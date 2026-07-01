@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Continuous Identity Trust — Live Agent</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root{
+    --accent:#00ffcc; --alert:#ff3366; --bg:#0d1117; --panel:#161b22;
+    --line:#30363d; --muted:#8b949e; --human:#4aa3ff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:#e6edf3;
+    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:28px 20px 60px}
+  h1{font-size:1.7rem; margin:0 0 2px}
+  h1 .a{color:var(--accent)}
+  .sub{color:var(--muted); margin:0 0 22px; font-size:.95rem}
+  .pill{
+    display:inline-block; font-size:.72rem; padding:3px 9px; border-radius:20px;
+    border:1px solid var(--line); color:var(--muted); vertical-align:middle; margin-left:8px;
+  }
+  .pill.ok{color:var(--accent); border-color:var(--accent)}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px}
+  .panel h3{margin:0 0 14px; font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted)}
+  .riskno{font-size:3.4rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums}
+  .riskstate{font-size:.85rem; color:var(--muted); margin-top:4px}
+  .bar{height:14px; border-radius:8px; background:#21262d; margin:16px 0 6px; position:relative; overflow:hidden}
+  .bar > i{display:block; height:100%; width:0%; background:var(--accent); transition:width .12s linear}
+  .thresh{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--alert); opacity:.8}
+  canvas{width:100%; height:90px; display:block}
+  table{width:100%; border-collapse:collapse; font-size:.82rem}
+  td{padding:6px 4px; border-bottom:1px solid #21262d}
+  td.v{text-align:right; font-variant-numeric:tabular-nums; color:var(--muted)}
+  tr.botlike td{color:var(--alert)}
+  tr.botlike td.name::before{content:"▲ "; font-size:.7rem}
+  .type{
+    width:100%; margin-top:10px; background:#0d1117; border:1px solid var(--line);
+    color:#e6edf3; padding:10px 12px; border-radius:8px; font-size:.9rem;
+  }
+  .controls{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap}
+  button{
+    font:inherit; font-size:.85rem; padding:9px 14px; border-radius:8px; cursor:pointer;
+    background:#21262d; color:#e6edf3; border:1px solid var(--line);
+  }
+  button.danger{border-color:var(--alert); color:var(--alert)}
+  button:hover{border-color:var(--muted)}
+  .stepup{
+    display:none; margin-top:16px; border:1px solid var(--alert); background:rgba(255,51,102,.09);
+    border-radius:10px; padding:16px 18px;
+  }
+  .stepup.show{display:block}
+  .stepup h2{margin:0 0 6px; color:var(--alert); font-size:1.05rem}
+  .stepup ul{margin:8px 0 12px; padding-left:18px; color:#e6edf3; font-size:.88rem}
+  .hint{color:var(--muted); font-size:.82rem; margin-top:18px}
+  .full{grid-column:1 / -1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Continuous <span class="a">Identity Trust</span> — live agent<span id="engine" class="pill">loading…</span></h1>
+  <p class="sub">Move the mouse around and type below. The Wasm agent reads the <i>physics</i> of how you
+     do it and scores a live risk number. Then hit "simulate takeover" and watch a human session
+     get hijacked in real time.</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>Continuous risk state</h3>
+      <div class="riskno" id="riskno">0<span style="font-size:1.4rem">%</span></div>
+      <div class="riskstate" id="verdict">watching — looks human</div>
+      <div class="bar"><i id="barfill"></i><span class="thresh" id="threshmark"></span></div>
+      <div style="font-size:.72rem;color:var(--muted)">step-up threshold marked in red</div>
+      <div class="controls">
+        <button id="simbtn" class="danger">▶ Simulate takeover</button>
+        <button id="resetbtn">Reset</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Behavioural features (this window)</h3>
+      <table id="feattable"><tbody></tbody></table>
+    </div>
+
+    <div class="panel full">
+      <h3>Risk over time</h3>
+      <canvas id="spark" width="920" height="90"></canvas>
+      <input class="type" id="typebox" placeholder="type here so it can read your keystroke rhythm…">
+    </div>
+  </div>
+
+  <div class="stepup" id="stepup">
+    <h2>⚠ Step-up authentication required</h2>
+    <div>The session started as a verified human, but its behaviour just drifted away from that baseline:</div>
+    <ul id="reasons"></ul>
+    <button id="verifybtn">Re-verify identity</button>
+  </div>
+
+  <p class="hint">Runs entirely in your browser. The 1.9&nbsp;kB Wasm module does the feature maths; a
+     compact edge scorer reads the device-independent signals (how straight the path is, how much the
+     direction wanders, how even the typing is). No data leaves the page — the whole point is that this
+     could run silently on any client.</p>
+</div>
+
+<script>
+// ---- feature metadata --------------------------------------------------------
+const FEATURES = ["speed_mean","speed_std","accel_std","path_efficiency","angle_std","dt_std","key_interval_std"];
+const NAMES = {
+  speed_mean:"pointer speed", speed_std:"speed consistency", accel_std:"acceleration smoothness",
+  path_efficiency:"path straightness", angle_std:"direction changes",
+  dt_std:"sampling cadence", key_interval_std:"keystroke rhythm"
+};
+// Reason text shown when a feature drives a step-up.
+const WHY = {
+  speed_mean:"unnaturally fast, uniform pointer motion",
+  speed_std:"pointer speed is too consistent to be a hand",
+  accel_std:"movement is too smooth — no human micro-corrections",
+  path_efficiency:"cursor travels in near-perfect straight lines",
+  angle_std:"almost no direction changes, unlike a real hand",
+  dt_std:"events arrive on a metronome (scripted timer)",
+  key_interval_std:"keystrokes land with robotic, even timing"
+};
+
+// NOTE on scoring: the notebook exports a full logistic "edge model" (web/model.json)
+// trained on the synthetic telemetry. But live browser input lives on a totally
+// different scale — screen pixels, event-loop timing — so absolute-speed features
+// don't transfer. The live agent therefore scores on the *scale-invariant* signals
+// that do carry across devices: how straight the path is, how little the direction
+// changes, and how metronomic the typing is. Same idea as the pitch, tuned for the
+// edge. (This domain-shift point is exactly why the engine leans on a smoothed
+// continuous state instead of trusting any single raw score.)
+
+// ---- wasm agent (with a JS fallback that mirrors agent/src/lib.rs) -----------
+let wasm = null, usingWasm = false;
+
+async function loadWasm(){
+  try{
+    let bytes;
+    const r = await fetch("agent.wasm");
+    bytes = await r.arrayBuffer();
+    const {instance} = await WebAssembly.instantiate(bytes, {});
+    wasm = instance.exports; usingWasm = true;
+  }catch(e){ usingWasm = false; }
+}
+
+function std(a){
+  if(!a.length) return 0;
+  let s=0,ss=0; for(const v of a){s+=v; ss+=v*v;}
+  const m=s/a.length; const v=ss/a.length - m*m; return Math.sqrt(v<0?0:v);
+}
+// Pure-JS version of the exact same feature maths, used if wasm can't load.
+function jsFeatures(moves, keys){
+  const n=moves.length;
+  if(n<3) return {f:new Array(7).fill(0), n, nk:keys.length};
+  const speeds=[], turns=[], dts=[];
+  let pathLen=0, pdx=0,pdy=0, hp=false;
+  for(let i=1;i<n;i++){
+    const dx=moves[i].x-moves[i-1].x, dy=moves[i].y-moves[i-1].y;
+    const dt=Math.max(1, moves[i].t-moves[i-1].t);
+    const step=Math.hypot(dx,dy); pathLen+=step; speeds.push(step/dt); dts.push(dt);
+    if(hp){ turns.push(Math.atan2(pdx*dy-pdy*dx, pdx*dx+pdy*dy)); }
+    pdx=dx; pdy=dy; hp=true;
+  }
+  dts.unshift(dts[0]||16);
+  const accel=[]; for(let i=1;i<speeds.length;i++) accel.push(speeds[i]-speeds[i-1]);
+  const straight=Math.hypot(moves[n-1].x-moves[0].x, moves[n-1].y-moves[0].y);
+  const mean=a=>a.reduce((p,c)=>p+c,0)/(a.length||1);
+  return {f:[
+    mean(speeds), std(speeds), std(accel), straight/(pathLen+1e-6),
+    std(turns), std(dts), std(keys)
+  ], n, nk:keys.length};
+}
+function features(moves, keys){
+  if(!usingWasm) return jsFeatures(moves, keys);
+  wasm.reset();
+  for(let i=0;i<moves.length;i++){
+    const dt = i>0 ? Math.max(1, moves[i].t-moves[i-1].t) : 16;
+    wasm.push_move(moves[i].x, moves[i].y, dt);
+  }
+  for(const k of keys) wasm.push_key(k);
+  const ptr = wasm.compute();
+  const f = Array.from(new Float64Array(wasm.memory.buffer, ptr, 7));
+  return {f, n:wasm.move_count(), nk:wasm.key_count()};
+}
+
+// ---- scoring (scale-invariant edge scorer, see note above) -------------------
+function liveScore(f, keys){
+  const za = (f[4]-0.18)/0.10;   // angle_std: near-zero direction change => bot
+  const zp = (f[3]-0.85)/0.15;   // path_efficiency: dead-straight => bot
+  const contrib = new Array(7).fill(0);
+  contrib[4] = -5.0*za;          // low angle variance pushes toward bot
+  contrib[3] =  1.0*zp;
+  let logit = -0.5 + contrib[3] + contrib[4];
+  if(keys.length>=3){            // only judge typing rhythm once there's some
+    const m = keys.reduce((a,b)=>a+b,0)/keys.length;
+    const s = Math.sqrt(keys.reduce((a,b)=>a+(b-m)*(b-m),0)/keys.length);
+    const cv = s/(m||1);         // coefficient of variation — device-independent
+    contrib[6] = -1.5*((cv-0.20)/0.12);
+    logit += contrib[6];
+  }
+  const p = 1/(1+Math.exp(-logit));
+  return {p:Math.max(0,Math.min(1,p)), contrib};
+}
+
+// ---- state -------------------------------------------------------------------
+const THRESH=0.6, ALPHA=0.3;
+let moves=[], keys=[], lastKey=0, risk=0, stepped=false, sim=false, simT=0;
+const hist=[];
+
+document.addEventListener("mousemove", e=>{
+  if(sim) return;
+  moves.push({x:e.clientX, y:e.clientY, t:performance.now()});
+  if(moves.length>90) moves.shift();
+});
+document.getElementById("typebox").addEventListener("keydown", ()=>{
+  if(sim) return;
+  const now=performance.now();
+  if(lastKey) keys.push(Math.min(1500, now-lastKey));
+  if(keys.length>15) keys.shift();
+  lastKey=now;
+});
+
+// Simulated takeover: overwrite the buffers with straight-line, metronomic input.
+function simStep(){
+  simT+=1;
+  const x=200+simT*9, y=200+simT*6;             // straight diagonal
+  moves.push({x:x+(Math.random()-.5)*0.6, y:y+(Math.random()-.5)*0.6, t:performance.now()});
+  if(moves.length>90) moves.shift();
+  keys.push(55+(Math.random()-.5)*4);           // robotic typing cadence
+  if(keys.length>15) keys.shift();
+}
+
+function tick(){
+  if(sim){ simStep(); simStep(); }
+  if(moves.length>=5){
+    const {f}=features(moves, keys);
+    const {p, contrib}=liveScore(f, keys);
+    risk = ALPHA*p + (1-ALPHA)*risk;
+    render(f, contrib, p);
+  } else {
+    risk *= 0.97;                                // idle: decay toward calm
+    render(null, null, null);
+  }
+}
+
+// ---- rendering ---------------------------------------------------------------
+const barfill=document.getElementById("barfill"), riskno=document.getElementById("riskno"),
+      verdict=document.getElementById("verdict"), spark=document.getElementById("spark"),
+      ctx=spark.getContext("2d"), tbody=document.querySelector("#feattable tbody");
+document.getElementById("threshmark").style.left=(THRESH*100)+"%";
+
+function color(r){ return r>=THRESH ? "#ff3366" : r>0.35 ? "#ffaa00" : "#00ffcc"; }
+
+function render(f, contrib, p){
+  const pct=Math.round(risk*100);
+  riskno.innerHTML = pct+'<span style="font-size:1.4rem">%</span>';
+  riskno.style.color = color(risk);
+  barfill.style.width = pct+"%";
+  barfill.style.background = color(risk);
+  verdict.textContent = risk>=THRESH ? "anomaly — step-up triggered"
+                       : risk>0.35 ? "elevated — watching closely" : "watching — looks human";
+
+  hist.push(risk); if(hist.length>460) hist.shift();
+  drawSpark();
+
+  if(f){
+    tbody.innerHTML="";
+    for(let i=0;i<7;i++){
+      const botlike = contrib && contrib[i]>0.4;
+      const tr=document.createElement("tr");
+      if(botlike) tr.className="botlike";
+      tr.innerHTML=`<td class="name">${NAMES[FEATURES[i]]}</td><td class="v">${f[i].toFixed(2)}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  if(risk>=THRESH && !stepped){ stepped=true; fireStepUp(contrib); }
+}
+
+function drawSpark(){
+  const w=spark.width, h=spark.height;
+  ctx.clearRect(0,0,w,h);
+  // threshold line
+  ctx.strokeStyle="rgba(255,51,102,.5)"; ctx.setLineDash([4,4]); ctx.beginPath();
+  ctx.moveTo(0,h-THRESH*h); ctx.lineTo(w,h-THRESH*h); ctx.stroke(); ctx.setLineDash([]);
+  if(hist.length<2) return;
+  ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<hist.length;i++){
+    const x=i/(hist.length-1)*w, y=h-hist[i]*h;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.strokeStyle=color(risk); ctx.stroke();
+}
+
+function fireStepUp(contrib){
+  const idx=[...contrib.keys()].sort((a,b)=>contrib[b]-contrib[a]).filter(i=>contrib[i]>0.4).slice(0,3);
+  const ul=document.getElementById("reasons"); ul.innerHTML="";
+  (idx.length?idx:[0]).forEach(i=>{
+    const li=document.createElement("li"); li.textContent=WHY[FEATURES[i]]; ul.appendChild(li);
+  });
+  document.getElementById("stepup").classList.add("show");
+}
+
+function reset(){
+  moves=[]; keys=[]; lastKey=0; risk=0; stepped=false; sim=false; simT=0; hist.length=0;
+  document.getElementById("stepup").classList.remove("show");
+  document.getElementById("simbtn").textContent="▶ Simulate takeover";
+  render(null,null,null);
+}
+document.getElementById("resetbtn").onclick=reset;
+document.getElementById("verifybtn").onclick=reset;
+document.getElementById("simbtn").onclick=e=>{
+  sim=!sim;
+  e.target.textContent = sim ? "■ Stop simulation" : "▶ Simulate takeover";
+  if(sim){ moves=[]; simT=0; }
+};
+
+// ---- boot --------------------------------------------------------------------
+(async ()=>{
+  await loadWasm();
+  const badge=document.getElementById("engine");
+  badge.textContent = usingWasm ? "wasm agent active" : "js fallback";
+  if(usingWasm) badge.classList.add("ok");
+  setInterval(tick, 140);
+  // shareable auto-demo: live.html?demo kicks off the takeover on its own
+  if(location.search.includes("demo")){
+    setTimeout(()=>document.getElementById("simbtn").click(), 400);
+  }
+})();
+</script>
+</body>
+</html>

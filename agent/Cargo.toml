@@ -1,0 +1,16 @@
+[package]
+name = "cit-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Continuous Identity Trust client telemetry agent, compiled to WebAssembly"
+
+[lib]
+crate-type = ["cdylib"]
+
+# no_std + abort keeps the .wasm tiny and tamper-resistant — no allocator, no
+# std, no panic-unwinding machinery. Just arithmetic over a fixed buffer.
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true

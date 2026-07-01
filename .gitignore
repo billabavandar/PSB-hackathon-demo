@@ -11,3 +11,6 @@ wheels/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Rust / wasm build artifacts
+agent/target/
